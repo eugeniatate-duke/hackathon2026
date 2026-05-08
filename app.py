@@ -57,6 +57,30 @@ lottery_tickets = st.slider(
     max_lottery_tickets
 )
 
+display_cols = {
+
+    "name": "Student",
+
+    "predicted_attendance_prob": "Predicted Attendance",
+
+    "merit_score": "Merit Score",
+
+    "trivia_passed": "Trivia Passed",
+
+    "good_gpa_standing": "Good GPA Standing",
+
+    "volunteer_hours": "Volunteer Hours",
+
+    "duke_event_participation": "Duke Event Participation",
+
+    "student_section_engagement": "Student Section Engagement",
+
+    "past_attendance_rate": "Past Attendance Rate",
+
+    "no_show_rate": "No-Show Rate"
+
+}
+
 st.info(
     f"Total tickets: {total_tickets} | "
     f"Campout reserved: {campout_tickets} | "
@@ -179,26 +203,9 @@ if st.button("Run Allocation"):
     st.markdown("## Ticket Winners")
 
     st.dataframe(
-        winners[[
-              "name",
-              "predicted_attendance_prob",
-
-                "merit_score",
-
-                "trivia_passed",
-
-                "good_gpa_standing",
-
-                "volunteer_hours",
-
-                "duke_event_participation",
-
-                "student_section_engagement",
-
-                "past_attendance_rate",
-
-                "no_show_rate"
-        ]].sort_values("predicted_attendance_prob", ascending=False),
+         winners[display_cols.keys()]
+        .rename(columns=display_cols)
+        .sort_values("Predicted Attendance", ascending=False),
         use_container_width=True
     )
 
@@ -223,16 +230,9 @@ if st.button("Run Allocation"):
         st.info("No replacements needed.")
     else:
         st.dataframe(
-            replacements[[
-                "name",
-                "predicted_attendance_prob",
-                "merit_score",
-                "trivia_passed",
-                "good_gpa_standing",
-                "volunteer_hours",
-                "past_attendance_rate",
-                "no_show_rate"
-            ]].sort_values("predicted_attendance_prob", ascending=False),
+            replacements[display_cols.keys()]
+            .rename(columns=display_cols)
+            .sort_values("Predicted Attendance", ascending=False),
             use_container_width=True
         )
 
