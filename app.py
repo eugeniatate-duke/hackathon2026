@@ -1,75 +1,252 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+
 from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+
+DUKE_LOGO_PATH = "/Users/eugeniatate/dukelogo.png"
+
+DUKE_BLUE = "#012169"
+
+st.set_page_config(page_title="🏀CameronFair AI", layout="wide")
+
+st.markdown(
+    f"""
+    <style>
+    h1, h2, h3 {{
+        color: {DUKE_BLUE};
+    }}
+    div.stButton > button {{
+        background-color: {DUKE_BLUE};
+        color: white;
+        border-radius: 10px;
+        padding: 0.6rem 1.2rem;
+        border: none;
+    }}
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+try:
+    st.image(DUKE_LOGO_PATH, width=250)
+except Exception:
+    st.write("🏀")
 
 st.title("🏀 CameronFair AI")
-st.subheader("AI-Powered Duke Basketball Ticket Allocation")
+st.subheader("Duke Basketball Ticket Lottery")
 
-# Controls
-num_students = st.slider("Number of Students", 10, 100, 30)
-num_tickets = st.slider("Tickets Available", 5, 30, 10)
+num_students = st.slider("Number of Students in Lottery Pool", 50, 500, 200)
+
+total_tickets = st.slider("Total Student Tickets Available", 20, 200, 100)
+
+campout_tickets = st.slider(
+    "Campout Reserved Tickets",
+    0,
+    total_tickets,
+    50
+)
+
+max_lottery_tickets = total_tickets - campout_tickets
+
+lottery_tickets = st.slider(
+    "AI Lottery Tickets",
+    0,
+    max_lottery_tickets,
+    max_lottery_tickets
+)
+
+st.info(
+    f"Total tickets: {total_tickets} | "
+    f"Campout reserved: {campout_tickets} | "
+    f"AI lottery: {lottery_tickets}"
+)
 
 if st.button("Run Allocation"):
 
     np.random.seed(42)
 
-    # Generate data
     students = pd.DataFrame({
         "name": [f"Student_{i}" for i in range(num_students)],
-        "engagement": np.random.randint(1, 100, num_students),
-        "past_attendance": np.random.rand(num_students)
+
+        # Eligibility / merit features
+        "trivia_passed": np.random.choice([0, 1], size=num_students, p=[0.25, 0.75]),
+        "good_gpa_standing": np.random.choice([0, 1], size=num_students, p=[0.15, 0.85]),
+        "volunteer_hours": np.random.randint(0, 80, num_students),
+        "duke_event_participation": np.random.randint(0, 100, num_students),
+        "student_section_engagement": np.random.randint(0, 100, num_students),
+
+        # Reliability features
+        "past_attendance_rate": np.random.uniform(0.4, 1.0, num_students),
+        "no_show_rate": np.random.uniform(0.0, 0.35, num_students)
     })
 
-    # Simulate historical attendance
-    students["attendance_prob"] = 0.5 * (students["engagement"]/100) + 0.5 * students["past_attendance"]
+    students["volunteer_score"] = students["volunteer_hours"] / students["volunteer_hours"].max()
+    students["event_score"] = students["duke_event_participation"] / 100
+    students["engagement_score"] = students["student_section_engagement"] / 100
+
+    students["merit_score"] = (
+        0.25 * students["trivia_passed"] +
+        0.20 * students["good_gpa_standing"] +
+        0.20 * students["volunteer_score"] +
+        0.15 * students["event_score"] +
+        0.20 * students["engagement_score"]
+    )
+
+    students["true_attendance_likelihood"] = (
+        0.35 * students["past_attendance_rate"] +
+        0.30 * students["merit_score"] +
+        0.20 * students["trivia_passed"] +
+        0.15 * students["good_gpa_standing"] -
+        0.35 * students["no_show_rate"]
+    )
 
     students["actual_show"] = (
-        students["attendance_prob"] + np.random.normal(0, 0.1, len(students))
-    ) > 0.5
+        students["true_attendance_likelihood"] + np.random.normal(0, 0.08, num_students)
+    ) > 0.55
+
     students["actual_show"] = students["actual_show"].astype(int)
 
-    # Train model
-    X = students[["engagement", "past_attendance"]]
+    features = [
+        "trivia_passed",
+        "good_gpa_standing",
+        "volunteer_score",
+        "event_score",
+        "engagement_score",
+        "past_attendance_rate",
+        "no_show_rate",
+        "merit_score"
+    ]
+
+    X = students[features]
     y = students["actual_show"]
 
-    model = LogisticRegression()
+    model = LogisticRegression(max_iter=1000)
     model.fit(X, y)
 
-    # Predict attendance
-    students["predicted_prob"] = model.predict_proba(X)[:, 1]
+    students["predicted_attendance_prob"] = model.predict_proba(X)[:, 1]
 
-    # AI Allocation
-    weights = students["predicted_prob"] / students["predicted_prob"].sum()
-    winners = students.sample(n=num_tickets, weights=weights, random_state=1)
+    eligible_students = students[
+        (students["trivia_passed"] == 1) &
+        (students["good_gpa_standing"] == 1)
+    ].copy()
 
-    st.subheader("🎟️ AI Ticket Winners")
-    st.dataframe(winners[["name", "predicted_prob"]])
+    if lottery_tickets > len(eligible_students):
+        lottery_tickets = len(eligible_students)
 
-    # Simulate no-shows (AI)
-    winners["show_up"] = np.random.rand(len(winners)) < winners["predicted_prob"]
-    no_shows = winners[winners["show_up"] == False]
+    weights = (
+        eligible_students["predicted_attendance_prob"] *
+        eligible_students["merit_score"]
+    )
 
-    st.subheader("❌ AI No-Shows")
-    st.write(no_shows["name"].tolist())
+    weights = weights / weights.sum()
 
-    # Random baseline
-    random_winners = students.sample(n=num_tickets, random_state=1)
-    random_winners["show_up"] = np.random.rand(len(random_winners)) < random_winners["predicted_prob"]
-    random_no_shows = random_winners[random_winners["show_up"] == False]
+    winners = eligible_students.sample(
+        n=lottery_tickets,
+        weights=weights,
+        random_state=1
+    ).copy()
 
-    st.subheader("📊 Comparison")
-    st.write(f"🎲 Random No-Shows: {len(random_no_shows)}")
-    st.write(f"🤖 AI No-Shows: {len(no_shows)}")
+    winners["show_up"] = (
+        np.random.rand(len(winners)) < winners["predicted_attendance_prob"]
+    )
 
-    # Reallocation
-    remaining = students[~students["name"].isin(winners["name"])]
-    new_weights = remaining["predicted_prob"] / remaining["predicted_prob"].sum()
-    new_winners = remaining.sample(n=len(no_shows), weights=new_weights)
+    no_shows = winners[winners["show_up"] == False].copy()
 
-    st.subheader("🔁 Reallocated Tickets")
-    st.write(new_winners["name"].tolist())
+    remaining_students = eligible_students[
+        ~eligible_students["name"].isin(winners["name"])
+    ].copy()
 
-    # Visualization
-    st.subheader("📈 AI Predicted Attendance")
-    st.bar_chart(students.set_index("name")["predicted_prob"])
+    if len(no_shows) > 0 and len(remaining_students) > 0:
+        replacement_count = min(len(no_shows), len(remaining_students))
+
+        replacement_weights = (
+            remaining_students["predicted_attendance_prob"] *
+            remaining_students["merit_score"]
+        )
+
+        replacement_weights = replacement_weights / replacement_weights.sum()
+
+        replacements = remaining_students.sample(
+            n=replacement_count,
+            weights=replacement_weights,
+            random_state=2
+        ).copy()
+    else:
+        replacements = pd.DataFrame(columns=students.columns)
+
+    st.markdown("## Ticket Winners")
+
+    st.dataframe(
+        winners[[
+              "name",
+              "predicted_attendance_prob",
+
+                "merit_score",
+
+                "trivia_passed",
+
+                "good_gpa_standing",
+
+                "volunteer_hours",
+
+                "duke_event_participation",
+
+                "student_section_engagement",
+
+                "past_attendance_rate",
+
+                "no_show_rate"
+        ]].sort_values("predicted_attendance_prob", ascending=False),
+        use_container_width=True
+    )
+
+    st.markdown("## Simulated No-Shows")
+
+    if len(no_shows) == 0:
+        st.success("No simulated no-shows.")
+    else:
+        st.dataframe(
+            no_shows[[
+                "name",
+                "predicted_attendance_prob",
+                "merit_score",
+                "no_show_rate"
+            ]],
+            use_container_width=True
+        )
+
+    st.markdown("## Replacement Winners")
+
+    if len(replacements) == 0:
+        st.info("No replacements needed.")
+    else:
+        st.dataframe(
+            replacements[[
+                "name",
+                "predicted_attendance_prob",
+                "merit_score",
+                "trivia_passed",
+                "good_gpa_standing",
+                "volunteer_hours",
+                "past_attendance_rate",
+                "no_show_rate"
+            ]].sort_values("predicted_attendance_prob", ascending=False),
+            use_container_width=True
+        )
+
+    rf_model = RandomForestClassifier(n_estimators=100, random_state=42)
+    rf_model.fit(X, y)
+
+    feature_importance = pd.DataFrame({
+        "feature": features,
+        "importance": rf_model.feature_importances_
+    }).sort_values("importance", ascending=False)
+
+    st.markdown("## What Features Drive the Model?")
+
+    st.dataframe(
+        feature_importance,
+        use_container_width=True
+    )
